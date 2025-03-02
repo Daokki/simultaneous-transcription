@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>英語学習用同時文字起こしアプリ</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .container {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        
+        button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        #startBtn {
+            background-color: #4CAF50;
+            color: white;
+        }
+        
+        #stopBtn {
+            background-color: #f44336;
+            color: white;
+        }
+        
+        #toggleTranslationBtn {
+            background-color: #2196F3;
+            color: white;
+        }
+        
+        .transcription-container {
+            margin-top: 20px;
+        }
+        
+        .transcription-box {
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 5px;
+            min-height: 150px;
+            margin-bottom: 15px;
+            background-color: white;
+        }
+        
+        .translation-box {
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 5px;
+            min-height: 150px;
+            background-color: #f0f8ff;
+        }
+        
+        h2 {
+            color: #333;
+        }
+        
+        .status {
+            margin-top: 10px;
+            font-style: italic;
+            color: #666;
+        }
+        
+        .listening {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>英語学習用同時文字起こしアプリ</h1>
+        
+        <div class="controls">
+            <button id="startBtn">文字起こし開始</button>
+            <button id="stopBtn" disabled>停止</button>
+            <button id="toggleTranslationBtn">翻訳表示切替</button>
+        </div>
+        
+        <div class="status">ステータス: <span id="status">停止中</span></div>
+        
+        <div class="transcription-container">
+            <h2>英語 (文字起こし)</h2>
+            <div id="transcriptionBox" class="transcription-box"></div>
+            
+            <h2>日本語 (翻訳)</h2>
+            <div id="translationBox" class="translation-box"></div>
+        </div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            const toggleTranslationBtn = document.getElementById('toggleTranslationBtn');
+            const transcriptionBox = document.getElementById('transcriptionBox');
+            const translationBox = document.getElementById('translationBox');
+            const statusSpan = document.getElementById('status');
+            
+            let isListening = false;
+            let showTranslation = true;
+            let recognition;
+            
+            // Web Speech APIがサポートされているか確認
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                alert('お使いのブラウザは音声認識をサポートしていません。Chrome、Edge、Safariなどの最新版をお試しください。');
+                startBtn.disabled = true;
+                return;
+            }
+            
+            // 音声認識オブジェクトの初期化
+            function initRecognition() {
+                recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+                recognition.lang = 'en-US';  // 英語に設定
+                recognition.continuous = true;
+                recognition.interimResults = true;
+                
+                // 音声認識結果のイベントリスナー
+                recognition.onresult = function(event) {
+                    let interimTranscript = '';
+                    let finalTranscript = '';
+                    
+                    for (let i = event.resultIndex; i < event.results.length; i++) {
+                        const transcript = event.results[i][0].transcript;
+                        
+                        if (event.results[i].isFinal) {
+                            finalTranscript += transcript;
+                            // 翻訳を実行
+                            translateText(transcript);
+                        } else {
+                            interimTranscript += transcript;
+                        }
+                    }
+                    
+                    // 暫定的な認識結果を表示
+                    if (interimTranscript) {
+                        const interimElement = document.createElement('p');
+                        interimElement.classList.add('interim');
+                        interimElement.textContent = interimTranscript;
+                        
+                        // 前の暫定結果を削除
+                        const prevInterim = transcriptionBox.querySelector('.interim');
+                        if (prevInterim) {
+                            transcriptionBox.removeChild(prevInterim);
+                        }
+                        
+                        transcriptionBox.appendChild(interimElement);
+                    }
+                    
+                    // 確定した認識結果を表示
+                    if (finalTranscript) {
+                        const finalElement = document.createElement('p');
+                        finalElement.textContent = finalTranscript;
+                        transcriptionBox.appendChild(finalElement);
+                        
+                        // 最新の結果が見えるようにスクロール
+                        transcriptionBox.scrollTop = transcriptionBox.scrollHeight;
+                    }
+                };
+                
+                // エラーハンドリング
+                recognition.onerror = function(event) {
+                    console.error('音声認識エラー:', event.error);
+                    statusSpan.textContent = `エラー: ${event.error}`;
+                    isListening = false;
+                    updateButtonState();
+                };
+                
+                // 音声認識が終了した場合
+                recognition.onend = function() {
+                    if (isListening) {
+                        // 自動再起動（ブラウザによっては一定時間後に自動終了することがある）
+                        recognition.start();
+                        statusSpan.textContent = '聞き取り中...';
+                        statusSpan.classList.add('listening');
+                    } else {
+                        statusSpan.textContent = '停止中';
+                        statusSpan.classList.remove('listening');
+                    }
+                };
+            }
+            
+            // テキスト翻訳関数（Google Translate APIを使用）
+            async function translateText(text) {
+                try {
+                    // Google Translate APIを使用する場合はここでAPIキーが必要です
+                    // 今回はデモ用に無料の翻訳APIを使用します
+                    const response = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|ja`);
+                    const data = await response.json();
+                    
+                    if (data && data.responseData) {
+                        const translatedText = data.responseData.translatedText;
+                        
+                        // 翻訳結果を表示
+                        const translationElement = document.createElement('p');
+                        translationElement.textContent = translatedText;
+                        translationBox.appendChild(translationElement);
+                        
+                        // 最新の結果が見えるようにスクロール
+                        translationBox.scrollTop = translationBox.scrollHeight;
+                    }
+                } catch (error) {
+                    console.error('翻訳エラー:', error);
+                    // エラーの場合はシンプルなフォールバックメッセージ
+                    const errorElement = document.createElement('p');
+                    errorElement.textContent = '[翻訳エラー - APIの制限またはネットワーク問題]';
+                    errorElement.style.color = 'red';
+                    translationBox.appendChild(errorElement);
+                }
+            }
+            
+            // ボタンの状態を更新
+            function updateButtonState() {
+                startBtn.disabled = isListening;
+                stopBtn.disabled = !isListening;
+            }
+            
+            // 翻訳表示を切り替え
+            toggleTranslationBtn.addEventListener('click', function() {
+                showTranslation = !showTranslation;
+                
+                if (showTranslation) {
+                    translationBox.parentElement.style.display = 'block';
+                    toggleTranslationBtn.textContent = '翻訳を非表示';
+                } else {
+                    translationBox.parentElement.style.display = 'none';
+                    toggleTranslationBtn.textContent = '翻訳を表示';
+                }
+            });
+            
+            // 文字起こし開始
+            startBtn.addEventListener('click', function() {
+                initRecognition();
+                
+                try {
+                    recognition.start();
+                    isListening = true;
+                    updateButtonState();
+                    statusSpan.textContent = '聞き取り中...';
+                    statusSpan.classList.add('listening');
+                } catch (error) {
+                    console.error('音声認識開始エラー:', error);
+                    alert('音声認識の開始に失敗しました。ブラウザの設定でマイクのアクセス許可を確認してください。');
+                }
+            });
+            
+            // 文字起こし停止
+            stopBtn.addEventListener('click', function() {
+                if (recognition) {
+                    recognition.stop();
+                }
+                isListening = false;
+                updateButtonState();
+                statusSpan.textContent = '停止中';
+                statusSpan.classList.remove('listening');
+            });
+            
+            // 初期状態では翻訳を表示
+            translationBox.parentElement.style.display = 'block';
+            toggleTranslationBtn.textContent = '翻訳を非表示';
+        });
+    </script>
+</body>
+</html>
